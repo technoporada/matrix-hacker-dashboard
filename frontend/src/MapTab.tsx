@@ -14,6 +14,12 @@ const TYPE_COLORS = {
   scrape: '#ff4444',
 };
 
+const escapeHtml = (str) => String(str)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
 const getColor = (type) => TYPE_COLORS[type] || '#888888';
 
 const MapTab = ({ theme }) => {
@@ -77,12 +83,12 @@ const MapTab = ({ theme }) => {
 
       marker.bindPopup(`
         <div style="font-family: 'Courier New', monospace; color: #0f0; background: #000; padding: 8px;">
-          <b style="color: ${color};">[${p.type.toUpperCase()}]</b><br/>
-          <b>Target:</b> ${p.target}<br/>
-          <b>IP:</b> ${p.ip}<br/>
-          <b>Location:</b> ${p.city}, ${p.country}<br/>
-          <b>Coords:</b> ${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}<br/>
-          <small>${new Date(p.created_at).toLocaleString('pl-PL')}</small>
+          <b style="color: ${escapeHtml(color)};">[${escapeHtml(p.type.toUpperCase())}]</b><br/>
+          <b>Target:</b> ${escapeHtml(p.target)}<br/>
+          <b>IP:</b> ${escapeHtml(p.ip)}<br/>
+          <b>Location:</b> ${escapeHtml(p.city)}, ${escapeHtml(p.country)}<br/>
+          <b>Coords:</b> ${escapeHtml(p.lat.toFixed(4))}, ${escapeHtml(p.lng.toFixed(4))}<br/>
+          <small>${escapeHtml(new Date(p.created_at).toLocaleString('pl-PL'))}</small>
         </div>
       `, { minWidth: 200 });
 

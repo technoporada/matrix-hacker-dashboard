@@ -3,9 +3,10 @@ const cheerio = require('cheerio');
 const whois = require('whois');
 const dns = require('dns').promises;
 const geoip = require('geoip-lite');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
+const execFilePromise = util.promisify(execFile);
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -14,7 +15,8 @@ const { WebSocketServer } = require('ws');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'history.json');
 const PORT = process.env.PORT || 3001;
-const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const API_KEY = process.env.API_KEY || '';
 
 let scans = [];
 
@@ -113,6 +115,12 @@ function isPrivateHostname(hostname) {
     if (first === 127) return true;
     if (first === 169 && second === 254) return true;
   }
+  const lower = hostname.toLowerCase();
+  if (lower === '::1' || lower === '0:0:0:0:0:0:0:1') return true;
+  if (lower === '0.0.0.0' || lower === '::' || lower === '0:0:0:0:0:0:0:0') return true;
+  if (lower.startsWith('fc00:') || lower.startsWith('fd00:')) return true;
+  if (lower.startsWith('fe80:')) return true;
+  if (lower.startsWith('ff00:') || lower.startsWith('ff02:')) return true;
   return false;
 }
 
@@ -288,7 +296,7 @@ const app = express();
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'none'; img-src 'self' data:;");
@@ -327,6 +335,19 @@ function rateLimit(req, res, next) {
 
 app.use(rateLimit);
 app.use(express.json({ limit: '500kb' }));
+
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  if (req.path.startsWith('/api/') && req.path !== '/api/health') {
+    if (API_KEY) {
+      const provided = req.headers['x-api-key'];
+      if (provided !== API_KEY) {
+        return res.status(401).json({ error: 'Unauthorized: invalid or missing X-API-Key header' });
+      }
+    }
+  }
+  next();
+});
 
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -526,9 +547,9 @@ app.post('/api/portscan', async (req, res) => {
     try { await execPromise('nmap --version'); } catch (e) {
       return res.status(500).json({ error: 'Nmap not installed. Install with: sudo apt install nmap' });
     }
-    const nmapTargets = safeTarget.includes(',') ? safeTarget.split(',').join(' ') : safeTarget;
-    broadcast('progress', { scan: 'portscan', message: `Running nmap on ${nmapTargets}...` });
-    const { stdout } = await execPromise(`nmap -p ${safePorts} ${nmapTargets} -oG -`);
+    const nmapTargets = safeTarget.includes(',') ? safeTarget.split(',') : [safeTarget];
+    broadcast('progress', { scan: 'portscan', message: `Running nmap on ${nmapTargets.join(' ')}...` });
+    const { stdout } = await execFilePromise('nmap', ['-p', safePorts, ...nmapTargets, '-oG', '-']);
     const portRegex = /(\d+)\/open\/tcp/g;
     const openPorts = [];
     let match;
@@ -594,7 +615,7 @@ app.post('/api/ssl', async (req, res) => {
     domain = sanitizeInput(domain);
     if (!isValidDomain(domain)) return res.status(400).json({ error: 'Invalid domain format' });
     console.log(`[SSL] Checking: ${domain}`);
-    const { stdout } = await execPromise(`echo | openssl s_client -connect ${domain}:443 -servername ${domain} 2>/dev/null | openssl x509 -noout -text`);
+    const { stdout } = await execFilePromise('bash', ['-c', `echo | openssl s_client -connect ${domain}:443 -servername ${domain} 2>/dev/null | openssl x509 -noout -text`]);
     const issuerMatch = stdout.match(/Issuer: (.+)/);
     const validFromMatch = stdout.match(/Not Before: (.+)/);
     const validToMatch = stdout.match(/Not After : (.+)/);
@@ -676,12 +697,12 @@ app.post('/api/full-recon', async (req, res) => {
     } catch (e) { results.subdomains = { success: false, error: e.message }; }
     broadcast('progress', { scan: 'full-recon', message: 'Phase 4/8: SSL certificate check...' });
     try {
-      const { stdout } = await execPromise(`echo | openssl s_client -connect ${target}:443 -servername ${target} 2>/dev/null | openssl x509 -noout -dates`);
+      const { stdout } = await execFilePromise('bash', ['-c', `echo | openssl s_client -connect ${target}:443 -servername ${target} 2>/dev/null | openssl x509 -noout -dates`]);
       results.ssl = { success: true, data: stdout };
     } catch (e) { results.ssl = { success: false, error: e.message }; }
     broadcast('progress', { scan: 'full-recon', message: 'Phase 5/8: Port scanning (22,80,443,8080,8443)...' });
     try {
-      const { stdout } = await execPromise(`nmap -p 22,80,443,8080,8443 ${target} -oG -`);
+      const { stdout } = await execFilePromise('nmap', ['-p', '22,80,443,8080,8443', target, '-oG', '-']);
       const portRegex = /(\d+)\/open\/tcp/g;
       const openPorts = [];
       let m;

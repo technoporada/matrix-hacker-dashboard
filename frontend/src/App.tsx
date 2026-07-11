@@ -111,10 +111,8 @@ const Dashboard = () => {
   const [fullReconTarget, setFullReconTarget] = useState('');
   const [fullReconResults, setFullReconResults] = useState(null);
   const [fullReconRunning, setFullReconRunning] = useState(false);
-  const [mediaUrl, setMediaUrl] = useState('');
   const [localPorts, setLocalPorts] = useState([]);
   const [localPortsLoading, setLocalPortsLoading] = useState(false);
-  const [aiAnalysis, setAiAnalysis] = useState('');
   const [historyList, setHistoryList] = useState([]);
   const [historyDetail, setHistoryDetail] = useState(null);
   const [historyFilter, setHistoryFilter] = useState('');
@@ -267,41 +265,6 @@ const Dashboard = () => {
     }
   };
 
-  const realMediaAnalysis = async () => {
-    if (!mediaUrl) return addLog('ERROR', 'URL obrazu pusty');
-    addLog('WARN', 'AI Media Analysis requires VITE_ANTHROPIC_API_KEY env var');
-    const key = import.meta.env.VITE_ANTHROPIC_API_KEY;
-    if (!key) {
-      setAiAnalysis('[BRAK KLUCZA API]\nSet VITE_ANTHROPIC_API_KEY in .env\nOr use backend as proxy.');
-      return;
-    }
-    try {
-      addLog('INFO', `AI analyzing: ${mediaUrl}`);
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': key },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'url', url: mediaUrl } },
-              { type: 'text', text: 'Analyze this image' }
-            ]
-          }]
-        })
-      });
-      if (!response.ok) throw new Error(`API error: ${response.status}`);
-      const data = await response.json();
-      const analysis = data.content.map(c => c.text).join('\n');
-      setAiAnalysis(`[AI ANALYSIS]\n\n${analysis}`);
-      addLog('SUCCESS', 'AI analysis completed');
-    } catch (error) {
-      addLog('ERROR', `AI failed: ${error.message}`);
-    }
-  };
-
   const exportJSON = (data, filename) => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -321,6 +284,12 @@ const Dashboard = () => {
     }
   };
 
+  useEffect(() => {
+    if (activeTab === 'history') {
+      loadHistory();
+    }
+  }, [activeTab]);
+
   const viewHistory = async (id) => {
     try {
       const res = await apiGet(`/api/history/${id}`);
@@ -332,7 +301,6 @@ const Dashboard = () => {
 
   const deleteHistory = async (id) => {
     try {
-      const res = await apiPost(`/api/history/${id}`, { _method: 'DELETE' });
       const r = await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
       const j = await r.json();
       if (j.success) {

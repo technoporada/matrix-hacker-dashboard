@@ -1,0 +1,11 @@
+services:
+  matrix-hacker-dashboard:
+    build: .
+    container_name: matrix-hacker-dashboard
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - API_KEY=${API_KEY:-}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3001}
+    restart: unless-stopped

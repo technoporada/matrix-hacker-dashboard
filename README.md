@@ -4,7 +4,7 @@
 
 **Recon dashboard** z prawdziwego zdarzenia. Nie symulacja, nie "demo mode".
 
-19 endpointów backend (Express + Node), frontend React + Vite, WebSocket na żywo, mapa świata, historia skanów, raporty HTML, wykrywanie technologii, CVE lookup, 3 motywy, rate limiter, SSRF protection, zero zbędnych dependencji.
+20 endpointów backend (Express + Node), frontend React + Vite, WebSocket na żywo, mapa świata, historia skanów, raporty HTML, wykrywanie technologii, CVE lookup, 3 motywy, rate limiter, SSRF protection, API key auth, execFile zamiast exec, zero zbędnych dependencji.
 
 ## Czy to działa?
 
@@ -70,9 +70,28 @@ cd frontend
 npm run build      # dist/ gotowy do serwowania z backendu
 ```
 
+### Deploy z Dockerem
+
+Jeden koment — buduje frontend i serwuje wszystko z backendu (port 3001):
+
+```bash
+docker compose up --build
+# → http://localhost:3001
+```
+
+Zmienne środowiskowe (`.env` lub export): `PORT` (3001), `API_KEY` (opcjonalny,
+wymuszany na `/api/*` poza `/api/health`), `CORS_ORIGIN` (domyślnie `http://localhost:3001`).
+
+### Demo (publicznie przez Cloudflare)
+
+```bash
+chmod +x share.sh
+./share.sh        # tunel HTTPS, link do udostępnienia
+```
+
 ## Co potrafi?
 
-### Backend (19 endpointów)
+### Backend (20 endpointów)
 
 | Endpoint | Co robi |
 |----------|---------|
@@ -116,12 +135,15 @@ Canvas z opadającymi znakami dopasowuje kolor do motywu.
 
 ## Bezpieczeństwo
 
+- **API Key auth** — nagłówek `X-API-Key` wymagany na wszystkich endpointach (except `/api/health`; pusty = dev mode)
 - Rate limiter: 60 req/min na IP (token bucket)
-- SSRF protection: DNS rebinding check, każdy redirect walidowany
+- SSRF protection: DNS rebinding check, każdy redirect walidowany, IPv6 loopback/link-local/multicast zablokowany
+- **execFile** zamiast `exec` — zero command injection, argumenty przekazywane jako tablica
+- CORS: `http://localhost:5173` (nie `*`)
 - CSP: `default-src 'self'`
 - X-Frame-Options: `DENY`
 - X-Content-Type-Options: `nosniff`
-- Ochrona przed XSS w raportach HTML (escaping)
+- XSS protection w mapie (escaping HTML w popupach Leaflet)
 - Żadnych zewnętrznych fontów ani CDN
 - 5 dependencji, zero optional
 
@@ -138,10 +160,11 @@ Canvas z opadającymi znakami dopasowuje kolor do motywu.
 ```
 matrix-hacker-dashboard/
 ├── backend/
-│   ├── server.js          # 19 endpointów + WebSocket
+│   ├── server.js          # 20 endpointów + WebSocket
 │   ├── package.json       # 5 dependencji
 │   ├── setup.sh           # instalacja + audit + test
-│   └── history.json       # baza skanów (auto)
+│   ├── .env.example       # API_KEY, CORS_ORIGIN, PORT
+│   └── .env               # zmienne środowiskowe (gitignored)
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx        # dashboard + 8 zakładek + motywy
@@ -152,7 +175,8 @@ matrix-hacker-dashboard/
 │   ├── index.html
 │   ├── vite.config.ts     # proxy /api + /ws
 │   ├── tailwind.config.js
-│   └── postcss.config.js
+│   ├── postcss.config.js
+│   └── .env.example       # VITE_ANTHROPIC_API_KEY, VITE_API_URL
 └── setup.sh               # główny setup (uruchamia backend/setup.sh)
 ```
 
@@ -198,12 +222,12 @@ Sporo osób robi podobne rzeczy. Znalazłem kilka:
 
 **Czym się wyróżniamy?**
 
-- **19 endpointów** — szerszy zakres niż większość (większość robi tylko portscan albo tylko OSINT)
+- **20 endpointów** — szerszy zakres niż większość (większość robi tylko portscan albo tylko OSINT)
 - **WebSocket live progress** na 3 skanach (portscan, subdomains, full-recon)
 - **Mapa świata GeoIP** z Leaflet.js — kolorowane pinezki po typie skanu
 - **Tech fingerprint (40+ sygnatur) + CVE lookup** — mało który projekt to ma
 - **3 motywy** (MATRIX/AMBER/ICE) — większość ma tylko matrix green
-- **SSRF protection + rate limiter + CSP** — bezpieczeństwo, nie tylko ładny frontend
+- **SSRF protection + execFile + API key auth + rate limiter + CSP** — bezpieczeństwo, nie tylko ładny frontend
 - **5 dependencji** — minimalna powierzchnia ataku, żaden z tych projektów nie ma tak mało
 
 To nie jest "kolejny taki sam". To jest jeden z **najbardziej kompletnych** w swoim rodzaju, przy **najmniejszej liczbie zależności**.
