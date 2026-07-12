@@ -20,7 +20,7 @@ export interface WhoisResult {
 
 export interface GeoIpResult {
   ip: string; hostname?: string; country: string; region: string; city: string;
-  ll: number[]; timezone: string; coordinates: string; org: string;
+  ll: number[]; timezone: string; coordinates: string;
 }
 
 export interface PortResult {

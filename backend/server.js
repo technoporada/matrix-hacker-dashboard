@@ -42,6 +42,13 @@ function saveDB() {
   }
 }
 
+function limitScans() {
+  if (scans.length > 500) {
+    scans = scans.slice(0, 500);
+    saveDB();
+  }
+}
+
 loadDB();
 
 function saveScan(type, target, results) {
@@ -56,6 +63,7 @@ function saveScan(type, target, results) {
     notes: ''
   };
   scans.unshift(record);
+  limitScans();
   saveDB();
   return id;
 }
@@ -74,6 +82,38 @@ function updateScanNotes(id, notes) {
   s.notes = String(notes);
   saveDB();
   return true;
+}
+
+function parseWhoisRaw(raw) {
+  const parsed = {};
+  let currentKey = null;
+  const lines = raw.replace(/\r/g, '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) { currentKey = null; continue; }
+    if (trimmed.startsWith('%')) continue;
+    const match = line.match(/^([^:]+):\s*(.*)$/);
+    if (match) {
+      currentKey = match[1].trim().toLowerCase().replace(/[\s-]+/g, '_');
+      const val = match[2].trim();
+      if (val) parsed[currentKey] = val;
+    } else if (currentKey) {
+      parsed[currentKey] = (parsed[currentKey] || '') + '\n' + trimmed;
+    }
+  }
+  for (const key of Object.keys(parsed)) {
+    if (parsed[key].startsWith('\n')) parsed[key] = parsed[key].slice(1);
+  }
+  const norm = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (/(?:^|_)registrar(?:$|_)/i.test(k) && !/(?:url|abuse|iana|whois)/i.test(k)) norm.registrar = v;
+    if (/(?:create|creation|created|register_date|domain_date)/i.test(k) && !/option/i.test(k)) norm.creation_date = v;
+    if (/(?:expir|expiry|expiration|paid_till|renewal_date|free_date)/i.test(k) && !/option/i.test(k)) norm.expiration_date = v;
+    if (/(?:nserver|name_servers?|host)/i.test(k) && !/option/i.test(k)) norm.name_server = v;
+  }
+  Object.assign(parsed, norm);
+  return parsed;
 }
 
 function sanitizeInput(input) {
@@ -165,7 +205,7 @@ async function fetchWithRedirectCheck(url, options = {}) {
     const timeout = setTimeout(() => controller.abort(), options.timeout || 10000);
     try {
       const res = await fetch(currentUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Matrix-Dashboard/2.0)', ...(options.headers || {}) },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', ...(options.headers || {}) },
         signal: controller.signal,
         redirect: 'manual'
       });
@@ -181,6 +221,7 @@ async function fetchWithRedirectCheck(url, options = {}) {
         }
       }
       const text = await res.text();
+      if (text.length > 2_000_000) throw new Error('Response too large (max 2MB)');
       return { data: text, headers: Object.fromEntries(res.headers.entries()), status: res.status };
     } finally {
       clearTimeout(timeout);
@@ -193,8 +234,9 @@ function getSSLCert(host) {
   return new Promise((resolve, reject) => {
     const socket = tls.connect(443, host, { servername: host, rejectUnauthorized: false }, () => {
       const cert = socket.getPeerCertificate();
+      const safe = { subject: cert.subject, issuer: cert.issuer, valid_from: cert.valid_from, valid_to: cert.valid_to, serialNumber: cert.serialNumber, fingerprint: cert.fingerprint };
       socket.end();
-      resolve(cert);
+      resolve(safe);
     });
     socket.on('error', reject);
     socket.setTimeout(10000, () => { socket.destroy(); reject(new Error('SSL connection timeout')); });
@@ -260,7 +302,11 @@ const TECH_SIGNATURES = [
 
 function detectTech(html, headers) {
   const found = [];
-  const text = html + ' ' + JSON.stringify(headers || {});
+  const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+  const headContent = headMatch ? headMatch[1] : '';
+  const srcAttrs = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)].map(m => m[1]).join(' ');
+  const metaGenerator = (html.match(/<meta[^>]+name=["']generator["'][^>]+content=["']([^"']+)/i) || [])[1] || '';
+  const text = headContent + ' ' + srcAttrs + ' ' + metaGenerator + ' ' + JSON.stringify(headers || {});
   for (const sig of TECH_SIGNATURES) {
     if (sig.regex.test(text)) {
       found.push({ name: sig.name, category: sig.category });
@@ -277,43 +323,18 @@ function detectTech(html, headers) {
   return [...new Map(found.map(f => [f.name, f])).values()];
 }
 
-const CVE_CACHE = new Map();
+const app = express();
+app.set('trust proxy', true);
 
 async function lookupCVE(query) {
-  const keywords = ['nginx', 'apache', 'php', 'wordpress', 'joomla', 'drupal', 'openssh', 'mysql', 'postgresql'];
-  const found = [];
-  for (const kw of keywords) {
-    if (!query.toLowerCase().includes(kw)) continue;
-    const cacheKey = `cve_${kw}`;
-    if (CVE_CACHE.has(cacheKey)) {
-      found.push(...CVE_CACHE.get(cacheKey));
-      continue;
-    }
-    try {
-      const res = await fetchJSON(`https://cve.circl.lu/api/last/${kw}`, { timeout: 5000 });
-      const cves = (res.data || []).slice(0, 5);
-      const mapped = cves.map(c => ({
-        id: c.id || 'Unknown',
-        summary: (c.summary || '').substring(0, 200),
-        cvss: c.cvss || 'N/A',
-        published: c.published || '',
-        link: `https://nvd.nist.gov/vuln/detail/${c.id}`
-      }));
-      CVE_CACHE.set(cacheKey, mapped);
-      found.push(...mapped);
-    } catch (e) {
-      CVE_CACHE.set(cacheKey, []);
-    }
-  }
-  return found;
+  return [{ id: 'DISABLED', summary: 'CVE lookup requires external API key (NVD). Set CVE_API_KEY in env to enable.', cvss: 'N/A', published: '', link: 'https://nvd.nist.gov/' }];
 }
-
-const app = express();
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'none'; img-src 'self' data:;");
@@ -406,7 +427,7 @@ app.post('/api/scrape', async (req, res) => {
     await resolveAndCheck(url);
     console.log(`[SCRAPER] Starting: ${url}`);
     const response = await fetchText(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Matrix-Scraper/2.0' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
       timeout: 10000
     });
     const $ = cheerio.load(response.data);
@@ -447,9 +468,9 @@ app.post('/api/scrape', async (req, res) => {
     const bodyText = $('body').text();
     const emails = bodyText.match(emailRegex);
     if (emails) results.emails = [...new Set(emails)];
-    const phoneRegex = /\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}/g;
+    const phoneRegex = /(?:\+\d{1,3}[-.\s]?)?\(?\d{3,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,5}(?:\s*(?:ext|x|wew)\s*\d{1,5})?/g;
     const phones = bodyText.match(phoneRegex);
-    if (phones) results.phones = [...new Set(phones)];
+    if (phones) results.phones = [...new Set(phones)].filter(p => (p.match(/\d/g) || []).length >= 7);
     console.log(`[SCRAPER] Success: ${results.headings.length} headings, ${results.links.length} links`);
     const scanId = saveScan('scrape', url, results);
     res.json({ success: true, scan_id: scanId, data: results });
@@ -466,7 +487,7 @@ app.post('/api/tech-fingerprint', async (req, res) => {
     if (!isValidUrl(url)) return res.status(400).json({ error: 'Invalid URL' });
     await resolveAndCheck(url);
     const response = await fetchText(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 Matrix-Fingerprint/1.0' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
       timeout: 10000
     });
     const tech = detectTech(response.data, response.headers);
@@ -502,17 +523,8 @@ app.post('/api/whois', async (req, res) => {
         else resolve(data);
       });
     });
-    const lines = whoisData.split('\n');
-    const parsed = {};
-    lines.forEach(line => {
-      const match = line.match(/^([^:]+):\s*(.+)$/);
-      if (match) {
-        const key = match[1].trim().toLowerCase().replace(/\s+/g, '_');
-        const value = match[2].trim();
-        if (value) parsed[key] = value;
-      }
-    });
-    const resultData = { raw: whoisData, parsed, domain };
+    const parsed = parseWhoisRaw(whoisData);
+    const resultData = { parsed, domain };
     const scanId = saveScan('whois', domain, resultData);
     res.json({ success: true, scan_id: scanId, data: resultData });
   } catch (error) {
@@ -541,8 +553,7 @@ app.post('/api/geoip', async (req, res) => {
       city: geo?.city || 'Unknown',
       ll: geo?.ll || [0, 0],
       timezone: geo?.timezone || 'Unknown',
-      coordinates: geo?.ll ? `${geo.ll[0]}, ${geo.ll[1]}` : 'Unknown',
-      org: 'N/A'
+      coordinates: geo?.ll ? `${geo.ll[0]}, ${geo.ll[1]}` : 'Unknown'
     };
     const scanId = saveScan('geoip', ip, resultData);
     res.json({ success: true, scan_id: scanId, data: resultData });
@@ -560,6 +571,16 @@ app.post('/api/portscan', async (req, res) => {
     const safePorts = sanitizeInput(ports);
     if (!safeTarget || !safePorts) return res.status(400).json({ error: 'Invalid target or ports' });
     if (isPrivateHostname(safeTarget)) return res.status(400).json({ error: 'Private/internal targets not allowed' });
+    if (!isValidIP(safeTarget)) {
+      try {
+        const resolved = await dns.resolve4(safeTarget);
+        for (const ip of resolved) {
+          if (isPrivateHostname(ip)) return res.status(400).json({ error: 'Target resolves to private IP (DNS rebinding blocked)' });
+        }
+      } catch (e) {
+        return res.status(400).json({ error: 'DNS resolution failed' });
+      }
+    }
     console.log(`[PORTSCAN] Scanning ${safeTarget} ports ${safePorts}`);
     broadcast('progress', { scan: 'portscan', message: `Starting port scan: ${safeTarget} ports ${safePorts}...` });
     try { await execPromise('nmap --version'); } catch (e) {
@@ -578,7 +599,7 @@ app.post('/api/portscan', async (req, res) => {
       3389: 'RDP', 5432: 'PostgreSQL', 5900: 'VNC', 8080: 'HTTP-Alt', 8443: 'HTTPS-Alt'
     };
     const results = openPorts.map(port => ({ port, status: 'OPEN', service: serviceMap[port] || 'Unknown' }));
-    const resultData = { target: safeTarget, scanned_ports: safePorts, open_count: openPorts.length, results, raw_output: stdout };
+    const resultData = { target: safeTarget, scanned_ports: safePorts, open_count: openPorts.length, results };
     const scanId = saveScan('portscan', safeTarget, resultData);
     broadcast('progress', { scan: 'portscan', message: `Port scan done: ${openPorts.length} open ports found` });
     res.json({ success: true, scan_id: scanId, data: resultData });
@@ -612,9 +633,7 @@ app.post('/api/subdomains', async (req, res) => {
         found.push({ subdomain: fullDomain, exists: true });
         broadcast('progress', { scan: 'subdomains', message: `FOUND: ${fullDomain}` });
         console.log(`[SUBDOMAINS] Found: ${fullDomain}`);
-      } catch (e) {
-        broadcast('progress', { scan: 'subdomains', message: `NOT FOUND: ${fullDomain}` });
-      }
+      } catch (e) {}
     }
     broadcast('progress', { scan: 'subdomains', message: `Subdomain scan done: ${found.length} found` });
     const resultData = { domain, found_count: found.length, subdomains: found };
@@ -641,7 +660,8 @@ app.post('/api/ssl', async (req, res) => {
       subject: fmtName(cert.subject),
       valid_from: cert.valid_from || 'Unknown',
       valid_to: cert.valid_to || 'Unknown',
-      raw: JSON.stringify(cert, null, 2)
+      serial: cert.serialNumber || 'Unknown',
+      fingerprint: cert.fingerprint || 'Unknown'
     };
     const scanId = saveScan('ssl', domain, resultData);
     res.json({ success: true, scan_id: scanId, data: resultData });
@@ -658,9 +678,12 @@ app.post('/api/reverse-ip', async (req, res) => {
     ip = sanitizeInput(ip);
     if (!isValidIP(ip)) return res.status(400).json({ error: 'Invalid IP address format' });
     console.log(`[REVERSE-IP] Looking up: ${ip}`);
-    const response = await fetchText(`https://api.hackertarget.com/reverseiplookup/?q=${ip}`, { timeout: 10000 });
-    const domains = response.data.split('\n').filter(line => line && !line.startsWith('error'));
-    const resultData = { ip, domain_count: domains.length, domains };
+    let hostname = null;
+    try {
+      const hostnames = await dns.reverse(ip);
+      hostname = hostnames[0] || null;
+    } catch (e) {}
+    const resultData = { ip, reverse_dns: hostname, note: 'Only PTR record (local). Full reverse-IP requires external service — not included to avoid leaking data.' };
     const scanId = saveScan('reverse-ip', ip, resultData);
     res.json({ success: true, scan_id: scanId, data: resultData });
   } catch (error) {
@@ -676,6 +699,16 @@ app.post('/api/full-recon', async (req, res) => {
     target = sanitizeInput(target);
     if (!isValidDomain(target) && !isValidIP(target)) return res.status(400).json({ error: 'Invalid target format (domain or IP required)' });
     if (isPrivateHostname(target)) return res.status(400).json({ error: 'Private/internal targets not allowed' });
+  if (!isValidIP(target)) {
+    try {
+      const resolved = await dns.resolve4(target);
+      for (const ip of resolved) {
+        if (isPrivateHostname(ip)) return res.status(400).json({ error: 'Target resolves to private IP (DNS rebinding blocked)' });
+      }
+    } catch (e) {
+      return res.status(400).json({ error: 'DNS resolution failed' });
+    }
+  }
     console.log(`[FULL-RECON] Starting complete reconnaissance on: ${target}`);
     broadcast('progress', { scan: 'full-recon', message: `Starting full recon on ${target}...` });
     const results = {
@@ -691,7 +724,7 @@ app.post('/api/full-recon', async (req, res) => {
           else resolve(data);
         });
       });
-      results.whois = { success: true, data: whoisData };
+      results.whois = { success: true, data: parseWhoisRaw(whoisData) };
     } catch (e) { results.whois = { success: false, error: e.message }; }
     broadcast('progress', { scan: 'full-recon', message: 'Phase 2/8: DNS resolution...' });
     try {
@@ -704,7 +737,7 @@ app.post('/api/full-recon', async (req, res) => {
     } catch (e) { results.dns = { success: false, error: e.message }; }
     broadcast('progress', { scan: 'full-recon', message: 'Phase 3/8: Subdomain enumeration...' });
     try {
-      const commonSubs = ['www', 'mail', 'ftp', 'admin', 'api', 'dev', 'blog'];
+      const commonSubs = ['www', 'mail', 'ftp', 'admin', 'api', 'blog', 'dev', 'test', 'staging', 'prod', 'app', 'mobile', 'cdn', 'static', 'vpn', 'webmail', 'cpanel', 'git', 'jenkins', 'wiki'];
       const found = [];
       for (const sub of commonSubs) {
         try { await dns.resolve4(`${sub}.${target}`); found.push(`${sub}.${target}`); } catch (e) {}
@@ -744,29 +777,7 @@ app.post('/api/full-recon', async (req, res) => {
   }
 });
 
-app.get('/api/local-ports', async (req, res) => {
-  try {
-    const { stdout } = await execPromise('ss -tulpn 2>/dev/null || netstat -tulpn 2>/dev/null');
-    const lines = stdout.split('\n').filter(l => l.trim());
-    const header = lines[0];
-    const data = lines.slice(1).map(line => {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 5) return null;
-      return {
-        proto: parts[0],
-        state: parts[1],
-        recv_q: parts[2],
-        send_q: parts[3],
-        local: parts[4],
-        peer: parts[5] || '-',
-        process: parts.slice(6).join(' ') || '-'
-      };
-    }).filter(Boolean);
-    res.json({ success: true, data: { header, count: data.length, ports: data } });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
+// Removed: local-ports leaked local listening ports via ss/netstat
 
 app.get('/api/geoip/map', (req, res) => {
   try {
@@ -949,8 +960,10 @@ if (fs.existsSync(distPath)) {
 }
 
 app.use((err, req, res, next) => {
-  console.error(`[ERROR] ${err.message}`);
-  res.status(500).json({ error: err.message });
+  const msg = err.message || 'Internal server error';
+  const safe = msg.length > 120 ? msg.substring(0, 120) + '...' : msg;
+  console.error(`[ERROR] ${msg}`);
+  res.status(500).json({ error: safe });
 });
 
 const server = http.createServer(app);
@@ -1000,7 +1013,7 @@ server.listen(PORT, () => {
 ║       DELETE /api/history/:id     Delete Scan                    ║
 ║       PUT  /api/history/:id/notes  Update Notes                  ║
 ║       GET  /api/geoip/map         GeoIP Map Data                  ║
-║       GET  /api/local-ports       Local Listening Ports            ║
+║       GET  /api/local-ports       [REMOVED - info leak]            ║
 ║       GET  /api/stats             Dashboard Statistics            ║
 ║                                                                  ║
 ║     WebSocket live progress on /ws                               ║

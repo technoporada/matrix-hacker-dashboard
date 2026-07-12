@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import type { ThemeColors } from './types';
 
 const API = import.meta.env.VITE_API_URL || '';
+const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 const TYPE_COLORS: Record<string, string> = {
   geoip: '#00ff41',
@@ -40,7 +41,9 @@ const MapTab = ({ theme }: { theme: ThemeColors }) => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const r = await fetch(`${API}/api/geoip/map`);
+        const r = await fetch(`${API}/api/geoip/map`, {
+          headers: { ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) }
+        });
         const j = await r.json();
         if (j.success) {
           setPoints(j.data.points);

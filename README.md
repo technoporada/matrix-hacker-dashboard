@@ -16,30 +16,23 @@ cd backend && npm install && node server.js    # :3001
 cd frontend && npm run dev                     # :5173
 ```
 
+Setup: `./setup.sh` — sprawdza Node, instaluje zależności, testuje backend.
 Cloudflare tunnel: `./share.sh`
 
-## Rzeczywisty stan
+## Uwagi bezpieczeństwa
 
-AI napisało ~90% kodu. Potem człowiek znalazł:
+- Jeśli backend ma ustawione `API_KEY` w `.env`, wszystkie zapytania API muszą mieć nagłówek `X-API-Key` — ustaw `VITE_API_KEY` w `frontend/.env` na tę samą wartość
+- Rate limiting aktywny (100 req/min na IP, trust proxy włączone dla Cloudflare)
+- HSTS: `max-age=31536000; includeSubDomains`
+- Private IP check dla wszystkich endpointów DNS (SSRF fix)
+- Zero zewnętrznych API (żadnych calli do hackertarget.com, circl.lu itp.)
+- Zero remote fontów — tylko `'Courier New', monospace`
 
-- AI wyłączyło TypeScript strict mode (`strict: false`) żeby przechodziło >100 błędów
-- AI wymyśliło pole `geo?.org` w `geoip-lite` (nie istnieje, halucynacja)
-- AI zostawiło martwy import `Camera` + dead config `VITE_ANTHROPIC_API_KEY`
-- AI użyło `execFile('bash', ['-c', ...])` — command injection wektor
-- Brak private IP check w portscan/full-recon (SSRF)
-- `new URL(location)` bez try-catch (crash na malformed header)
-- 154MB dysku zżera baza `geoip-lite` (dla jednego endpointa)
-- CORS `.env.example` ma port 3001, kod ma 5173 — niespójne
-- Full-recon ma 7 subdomen, standalone endpoint 44 — niespójne
-- Full-recon ma 5 portów, standalone 1-1000 — niespójne
+## Zależności
 
-Wszystko naprawione. TypeScript strict: true, SSRF załatane, execFile bezpieczne, openssl zastąpiony `tls.connect()`.
+**Backend:** 5 w package.json (express, cheerio, whois, geoip-lite, ws)
+**Frontend:** React, Vite, leaflet — zero lucide-react, zero tailwindcss
 
-## Zależności (faktyczne)
+## Licencja
 
-**Backend:** 5 w package.json, 142 po instalacji, 182MB (z czego 154MB to baza geoip-lite)
-**Frontend:** 3 + dev, 101 po instalacji, 113MB
-
-## License
-
-MIT. Rób co chcesz.
+Proprietary — niekomercyjna. Użycie w firmie >10 pracowników lub przychodzie >250k EUR wymaga zapłaty. Kary: 10k EUR/miesiąc naruszenia.

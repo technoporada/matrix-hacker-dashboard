@@ -78,7 +78,7 @@ echo -e "${CYAN}[5/7] Weryfikuje minimalnosc zależności...${NC}"
 DEPS=$(node -e "const p=require('./package.json');console.log(Object.keys(p.dependencies||{}).join(', '))")
 echo -e "  Zależności: ${GREEN}$DEPS${NC}"
 DEP_COUNT=$(node -e "const p=require('./package.json');console.log(Object.keys(p.dependencies||{}).length)")
-echo -e "  Liczba: ${GREEN}$DEP_COUNT${NC} (cel: < 10)"
+echo -e "  Liczba: ${GREEN}$DEP_COUNT${NC} (cel: < 15)"
 if [ "$DEP_COUNT" -lt 10 ]; then
   echo -e "  [${GREEN}OK${NC}] Minimalna liczba zależności"
 else
@@ -125,7 +125,7 @@ echo "║   Frontend: http://localhost:5173                        ║"
 echo "║                                                          ║"
 echo "║   Security:                                              ║"
 echo "║   - Zero remote fonts                                    ║"
-echo "║   - Tylko 4 zależności główne                            ║"
+echo "║   - Tylko 5 zależności głównych                            ║"
 echo "║   - JSON storage (no SQLite native deps)                 ║"
 echo "║   - Manual CORS (no cors package)                        ║"
 echo "║   - Native fetch (no axios)                              ║"

@@ -1,83 +1,39 @@
-import { useState, useEffect, useRef } from 'react';
-import { Terminal, Globe, Play, Download, Search, Info, Activity, Shield, Layers, Clock, MapPin, Radio } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import MapTab from './MapTab';
 import useWebSocket from './useWebSocket';
 import type { ThemeColors, ThemeKey, LogEntry, ScraperResult, WhoisResult, GeoIpResult, PortResult, SubdomainResult, SslResult, HistoryScan } from './types';
 
 const API = import.meta.env.VITE_API_URL || '';
+const API_KEY = import.meta.env.VITE_API_KEY || '';
 
 const THEMES = {
   matrix: {
     name: 'MATRIX', bg: '#000a00', bg2: '#001a00', text: '#00ff41',
-    border: '#00cc33', muted: '#005a00', accent: '#00ff41', canvas: '#00ff41',
+    border: '#00cc33', muted: '#008000', accent: '#00ff41', canvas: '#00ff41',
     dim: '#003300', glow: 'rgba(0,255,65,0.3)', label: 'GREEN'
   },
   amber: {
     name: 'AMBER', bg: '#0a0500', bg2: '#1a0a00', text: '#ffb000',
-    border: '#cc8800', muted: '#5a3000', accent: '#ff8c00', canvas: '#ff8800',
+    border: '#cc8800', muted: '#805000', accent: '#ff8c00', canvas: '#ff8800',
     dim: '#331800', glow: 'rgba(255,176,0,0.3)', label: 'AMBER'
   },
   ice: {
     name: 'ICE', bg: '#00050a', bg2: '#000a1a', text: '#00eeff',
-    border: '#0099cc', muted: '#00305a', accent: '#0088ff', canvas: '#00ccff',
+    border: '#0099cc', muted: '#006080', accent: '#0088ff', canvas: '#00ccff',
     dim: '#001833', glow: 'rgba(0,238,255,0.3)', label: 'CYAN'
   }
 };
 
-const MatrixBackground = ({ theme, effect }: { theme: string; effect: string }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const color = (THEMES as Record<string, ThemeColors>)[theme]?.canvas || '#00ff41';
-    const bg = (THEMES as Record<string, ThemeColors>)[theme]?.bg || '#000';
-    const br = parseInt(bg.slice(1,3),16);
-    const bg2 = parseInt(bg.slice(3,5),16);
-    const bb = parseInt(bg.slice(5,7),16);
+const MatrixBackground = () => null;
 
-    if (effect === 'rain') {
-      const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      const fontSize = 14;
-      const columns = canvas.width / fontSize;
-      const drops = Array(Math.floor(columns)).fill(1);
-      const interval = setInterval(() => {
-        ctx.fillStyle = `rgba(${br},${bg2},${bb},0.1)`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = color;
-        ctx.font = fontSize + 'px monospace';
-        for (let i = 0; i < drops.length; i++) {
-          ctx.fillText(chars[Math.floor(Math.random() * chars.length)], i * fontSize, (drops[i] as number) * fontSize);
-          if ((drops[i] as number) * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
-          drops[i] = (drops[i] as number) + 1;
-        }
-      }, 33);
-      return () => clearInterval(interval);
-    } else if (effect === 'scanlines') {
-      ctx.fillStyle = `rgba(${br},${bg2},${bb},1)`;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = `rgba(${br > 128 ? br-30 : br+30},${bg2 > 128 ? bg2-30 : bg2+30},${bb > 128 ? bb-30 : bb+30},0.06)`;
-      for (let y = 0; y < canvas.height; y += 4) {
-        ctx.fillRect(0, y, canvas.width, 1);
-      }
-    } else if (effect === 'grid') {
-      ctx.fillStyle = `rgba(${br},${bg2},${bb},1)`;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = `rgba(${br > 200 ? br-40 : br+40},${bg2 > 200 ? bg2-40 : bg2+40},${bb > 200 ? bb-40 : bb+40},0.12)`;
-      ctx.lineWidth = 0.5;
-      const step = 40;
-      for (let x = 0; x < canvas.width; x += step) {
-        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-      }
-      for (let y = 0; y < canvas.height; y += step) {
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-      }
-    }
-  }, [theme, effect]);
-  return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none" style={{ opacity: effect === 'plain' ? 0 : 0.6 }} />;
+const I = {
+  globe: <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>,
+  layers: <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>,
+  shield: <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+  activity: <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+  clock: <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  terminal: <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>,
+  dl: <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
 };
 
 const toErr = (e: unknown): string => e instanceof Error ? e.message : String(e);
@@ -105,8 +61,6 @@ const Dashboard = () => {
   const [fullReconTarget, setFullReconTarget] = useState('');
   const [fullReconResults, setFullReconResults] = useState<Record<string, unknown> | null>(null);
   const [fullReconRunning, setFullReconRunning] = useState(false);
-  const [localPorts, setLocalPorts] = useState<Record<string, string>[]>([]);
-  const [localPortsLoading, setLocalPortsLoading] = useState(false);
   const [historyList, setHistoryList] = useState<HistoryScan[]>([]);
   const [historyDetail, setHistoryDetail] = useState<HistoryScan | null>(null);
   const [historyFilter, setHistoryFilter] = useState('');
@@ -122,17 +76,25 @@ const Dashboard = () => {
 
   const apiPost = async (endpoint: string, body: unknown): Promise<any> => {
     const r = await fetch(`${API}${endpoint}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) }, body: JSON.stringify(body)
     });
     return r.json();
   };
 
   const apiGet = async (endpoint: string): Promise<any> => {
-    const r = await fetch(`${API}${endpoint}`);
+    const r = await fetch(`${API}${endpoint}`, {
+      headers: { ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) }
+    });
     return r.json();
   };
 
-
+  const exportJSON = (data: any, filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
 
   const realWebScraper = async () => {
     if (!scraperUrl) return addLog('ERROR', 'URL pusty');
@@ -245,29 +207,6 @@ const Dashboard = () => {
     }
   };
 
-  const fetchLocalPorts = async () => {
-    setLocalPortsLoading(true);
-    try {
-      const r = await apiGet('/api/local-ports');
-      if (r.success) setLocalPorts(r.data.ports || []);
-      else addLog('ERROR', `Local ports: ${r.error}`);
-    } catch (e) {
-      addLog('ERROR', `Local ports failed: ${toErr(e)}`);
-    } finally {
-      setLocalPortsLoading(false);
-    }
-  };
-
-  const exportJSON = (data: any, filename: string) => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    addLog('SUCCESS', `Exported ${filename}`);
-  };
-
   const loadHistory = async () => {
     try {
       const res = await apiGet('/api/history');
@@ -294,7 +233,7 @@ const Dashboard = () => {
 
   const deleteHistory = async (id: string) => {
     try {
-      const r = await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
+      const r = await fetch(`${API}/api/history/${id}`, { method: 'DELETE', headers: { ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) } });
       const j = await r.json();
       if (j.success) {
         addLog('SUCCESS', 'Scan deleted');
@@ -308,7 +247,9 @@ const Dashboard = () => {
 
   const downloadReport = async (id: string) => {
     try {
-      const r = await fetch(`${API}/api/history/${id}/report`);
+      const r = await fetch(`${API}/api/history/${id}/report`, {
+        headers: { ...(API_KEY ? { 'X-API-Key': API_KEY } : {}) }
+      });
       const html = await r.text();
       const blob = new Blob([html], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
@@ -321,22 +262,21 @@ const Dashboard = () => {
   };
 
   const tabs = [
-    { id: 'scraper', name: 'SCRAPER', icon: Globe },
-    { id: 'osint', name: 'OSINT', icon: Search },
-    { id: 'subdomain', name: 'SUBDOMAINS', icon: Layers },
-    { id: 'ssl', name: 'SSL', icon: Shield },
-    { id: 'recon', name: 'RECON', icon: Activity },
-    { id: 'history', name: 'HISTORY', icon: Clock },
-    { id: 'map', name: 'MAP', icon: MapPin },
-    { id: 'ports', name: 'PORTS', icon: Radio },
-    { id: 'logs', name: 'LOGS', icon: Terminal }
+    { id: 'scraper', name: 'SCRAPER', icon: I.globe },
+    { id: 'osint', name: 'OSINT', icon: I.globe },
+    { id: 'subdomain', name: 'SUBDOMAINS', icon: I.layers },
+    { id: 'ssl', name: 'SSL', icon: I.shield },
+    { id: 'recon', name: 'RECON', icon: I.activity },
+    { id: 'history', name: 'HISTORY', icon: I.clock },
+    { id: 'map', name: 'MAP', icon: I.globe },
+    { id: 'logs', name: 'LOGS', icon: I.terminal }
   ];
 
   const T = t();
 
   return (
     <div style={{background: T.bg, color: T.text, fontFamily: "'Courier New',monospace", minHeight: '100vh', position: 'relative', overflow: 'hidden'}}>
-      <MatrixBackground theme={theme} effect={bgEffect} />
+      <MatrixBackground />
       <div style={{position: 'relative', zIndex: 10, padding: '16px'}}>
         <div style={{border: `2px solid ${T.border}`, background: T.bg2, padding: '16px', marginBottom: '16px', textAlign: 'center', opacity: 0.95}}>
           <h1 style={{fontSize: '24px', fontWeight: 'bold', marginBottom: '8px', animation: 'pulse 2s infinite'}}>
@@ -387,7 +327,7 @@ const Dashboard = () => {
                 color: activeTab === tab.id ? T.text : T.muted,
                 cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'monospace', fontSize: '14px'
               }}>
-              <tab.icon size={16} />{tab.name}
+              {tab.icon}{tab.name}
             </button>
           ))}
         </div>
@@ -396,7 +336,7 @@ const Dashboard = () => {
           {activeTab === 'scraper' && (
             <div>
               <h2 style={{fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                <Globe size={20} /> WEB SCRAPER
+                {I.globe} WEB SCRAPER
               </h2>
               <input type="text" value={scraperUrl} onChange={(e) => setScraperUrl(e.target.value)}
                 placeholder="https://example.com"
@@ -404,12 +344,12 @@ const Dashboard = () => {
               <div style={{display: 'flex', gap: '8px', marginBottom: '12px'}}>
                 <button onClick={realWebScraper} disabled={scraperRunning}
                   style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', border: `2px solid ${T.border}`, background: 'transparent', color: T.text, cursor: scraperRunning ? 'not-allowed' : 'pointer', opacity: scraperRunning ? 0.5 : 1, fontFamily: 'monospace'}}>
-                  <Play size={16} />{scraperRunning ? 'SCRAPING...' : 'START'}
+                  {scraperRunning ? 'SCRAPING...' : 'START'}
                 </button>
                 {scraperResults.length > 0 && (
                   <button onClick={() => exportJSON(scraperResults, 'scraper.json')}
                     style={{display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', border: `2px solid ${T.border}`, background: 'transparent', color: T.text, cursor: 'pointer', fontFamily: 'monospace'}}>
-                    <Download size={16} />EXPORT JSON
+                    {I.dl} EXPORT JSON
                   </button>
                 )}
               </div>
@@ -431,7 +371,7 @@ const Dashboard = () => {
             <div style={{display: 'flex', flexDirection: 'column', gap: '24px'}}>
               <div>
                 <h3 style={{fontSize: '18px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                  <Info size={16} /> WHOIS
+                  WHOIS
                 </h3>
                 <div style={{display: 'flex', gap: '8px', marginBottom: '8px'}}>
                   <input type="text" value={whoisDomain} onChange={(e) => setWhoisDomain(e.target.value)}
@@ -454,7 +394,7 @@ const Dashboard = () => {
               </div>
               <div>
                 <h3 style={{fontSize: '18px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                  <Globe size={16} /> GeoIP
+                  {I.globe} GeoIP
                 </h3>
                 <div style={{display: 'flex', gap: '8px', marginBottom: '8px'}}>
                   <input type="text" value={geoipIp} onChange={(e) => setGeoipIp(e.target.value)}
@@ -478,7 +418,7 @@ const Dashboard = () => {
               </div>
               <div>
                 <h3 style={{fontSize: '18px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                  <Activity size={16} /> Port Scanner
+                  {I.activity} Port Scanner
                 </h3>
                 <div style={{display: 'flex', gap: '8px', marginBottom: '8px'}}>
                   <input type="text" value={portScanTarget} onChange={(e) => setPortScanTarget(e.target.value)}
@@ -519,7 +459,7 @@ const Dashboard = () => {
           {activeTab === 'subdomain' && (
             <div>
               <h2 style={{fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                <Layers size={20} /> SUBDOMAIN ENUMERATION
+                {I.layers} SUBDOMAIN ENUMERATION
               </h2>
               <div style={{display: 'flex', gap: '8px', marginBottom: '12px'}}>
                 <input type="text" value={subdomainDomain} onChange={(e) => setSubdomainDomain(e.target.value)}
@@ -557,7 +497,7 @@ const Dashboard = () => {
           {activeTab === 'ssl' && (
             <div>
               <h2 style={{fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                <Shield size={20} /> SSL CERTIFICATE INFO
+                {I.shield} SSL CERTIFICATE INFO
               </h2>
               <div style={{display: 'flex', gap: '8px', marginBottom: '12px'}}>
                 <input type="text" value={sslDomain} onChange={(e) => setSslDomain(e.target.value)}
@@ -583,7 +523,7 @@ const Dashboard = () => {
           {activeTab === 'recon' && (
             <div>
               <h2 style={{fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                <Activity size={20} /> FULL RECONNAISSANCE
+                {I.activity} FULL RECONNAISSANCE
               </h2>
               <div style={{display: 'flex', gap: '8px', marginBottom: '12px'}}>
                 <input type="text" value={fullReconTarget} onChange={(e) => setFullReconTarget(e.target.value)}
@@ -646,7 +586,7 @@ const Dashboard = () => {
           {activeTab === 'history' && (
             <div>
               <h2 style={{fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between'}}>
-                <span><Clock size={20} /> SCAN HISTORY</span>
+                <span>{I.clock} SCAN HISTORY</span>
                 <button onClick={loadHistory}
                   style={{padding: '4px 12px', border: `1px solid ${T.border}`, background: 'transparent', color: T.text, cursor: 'pointer', fontSize: '12px', fontFamily: 'monospace'}}>
                   REFRESH
@@ -687,11 +627,11 @@ const Dashboard = () => {
                   <div style={{display: 'flex', gap: '8px', marginBottom: '12px'}}>
                     <button onClick={() => downloadReport(historyDetail.id)}
                       style={{padding: '8px 16px', border: `2px solid ${T.border}`, background: 'transparent', color: T.text, cursor: 'pointer', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: '6px'}}>
-                      <Download size={14} /> REPORT HTML
+                      {I.dl} REPORT HTML
                     </button>
                     <button onClick={() => exportJSON(historyDetail.results, `scan-${historyDetail.id}.json`)}
                       style={{padding: '8px 16px', border: `2px solid ${T.border}`, background: 'transparent', color: T.text, cursor: 'pointer', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: '6px'}}>
-                      <Download size={14} /> JSON
+                      {I.dl} JSON
                     </button>
                     <button onClick={() => deleteHistory(historyDetail.id)}
                       style={{padding: '8px 16px', border: `2px solid ${T.muted}`, background: 'transparent', color: T.muted, cursor: 'pointer', fontFamily: 'monospace'}}>
@@ -710,58 +650,10 @@ const Dashboard = () => {
             <MapTab theme={t()} />
           )}
 
-          {activeTab === 'ports' && (
-            <div>
-              <h2 style={{fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'space-between'}}>
-                <span><Radio size={20} /> LOCAL PORTS</span>
-                <button onClick={fetchLocalPorts} disabled={localPortsLoading}
-                  style={{padding: '4px 12px', border: `1px solid ${T.border}`, background: 'transparent', color: T.text, cursor: localPortsLoading ? 'not-allowed' : 'pointer', fontSize: '12px', fontFamily: 'monospace', opacity: localPortsLoading ? 0.5 : 1}}>
-                  {localPortsLoading ? 'SCANNING...' : 'REFRESH'}
-                </button>
-              </h2>
-              <div style={{border: `1px solid ${T.muted}`, padding: '8px', marginBottom: '12px', fontSize: '11px', color: T.muted, fontFamily: 'monospace'}}>
-                # ss -tulpn — nasłuchujące porty z procesami
-              </div>
-              <div style={{maxHeight: '384px', overflowY: 'auto'}}>
-                {localPorts.length === 0 ? (
-                  <div style={{color: T.muted, textAlign: 'center', padding: '32px', fontSize: '14px'}}>
-                    Kliknij REFRESH żeby sprawdzić lokalne porty.
-                  </div>
-                ) : (
-                  <table style={{width: '100%', fontSize: '12px', fontFamily: 'monospace', borderCollapse: 'collapse'}}>
-                    <thead>
-                      <tr style={{borderBottom: `2px solid ${T.border}`, color: T.accent}}>
-                        <th style={{textAlign: 'left', padding: '6px 8px'}}>PROTO</th>
-                        <th style={{textAlign: 'left', padding: '6px 8px'}}>STATE</th>
-                        <th style={{textAlign: 'left', padding: '6px 8px'}}>LOCAL</th>
-                        <th style={{textAlign: 'left', padding: '6px 8px'}}>PEER</th>
-                        <th style={{textAlign: 'left', padding: '6px 8px'}}>PROCESS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {localPorts.map((p, i) => (
-                        <tr key={i} style={{borderBottom: `1px solid ${T.muted}`, color: T.text}}>
-                          <td style={{padding: '4px 8px'}}>{p.proto}</td>
-                          <td style={{padding: '4px 8px', color: p.state === 'LISTEN' ? T.text : T.muted}}>{p.state}</td>
-                          <td style={{padding: '4px 8px', color: T.accent}}>{p.local}</td>
-                          <td style={{padding: '4px 8px'}}>{p.peer}</td>
-                          <td style={{padding: '4px 8px', fontSize: '11px'}}>{p.process}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-              <div style={{marginTop: '8px', fontSize: '11px', color: T.muted, textAlign: 'right'}}>
-                {localPorts.length} nasłuchujących portów
-              </div>
-            </div>
-          )}
-
           {activeTab === 'logs' && (
             <div>
               <h2 style={{fontSize: '20px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px'}}>
-                <Terminal size={20} /> SYSTEM LOGS
+                {I.terminal} SYSTEM LOGS
               </h2>
               <div style={{border: `1px solid ${T.muted}`, padding: '12px', height: '384px', overflowY: 'auto', background: T.bg}}>
                 {logs.length === 0 ? (
