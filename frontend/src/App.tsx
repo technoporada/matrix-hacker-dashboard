@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, Globe, Camera, Play, Download, Search, Info, Activity, Shield, Layers, Clock, MapPin, Radio } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Terminal, Globe, Play, Download, Search, Info, Activity, Shield, Layers, Clock, MapPin, Radio } from 'lucide-react';
 import MapTab from './MapTab';
 import useWebSocket from './useWebSocket';
+import type { ThemeColors, ThemeKey, LogEntry, ScraperResult, WhoisResult, GeoIpResult, PortResult, SubdomainResult, SslResult, HistoryScan } from './types';
 
 const API = import.meta.env.VITE_API_URL || '';
 
@@ -23,49 +24,45 @@ const THEMES = {
   }
 };
 
-const MatrixBackground = ({ theme, effect }) => {
-  const canvasRef = useRef(null);
+const MatrixBackground = ({ theme, effect }: { theme: string; effect: string }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    const color = THEMES[theme]?.canvas || '#00ff41';
-    const bg = THEMES[theme]?.bg || '#000';
+    const color = (THEMES as Record<string, ThemeColors>)[theme]?.canvas || '#00ff41';
+    const bg = (THEMES as Record<string, ThemeColors>)[theme]?.bg || '#000';
     const br = parseInt(bg.slice(1,3),16);
     const bg2 = parseInt(bg.slice(3,5),16);
     const bb = parseInt(bg.slice(5,7),16);
-
-    let interval;
-    let raf;
 
     if (effect === 'rain') {
       const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
       const fontSize = 14;
       const columns = canvas.width / fontSize;
       const drops = Array(Math.floor(columns)).fill(1);
-      interval = setInterval(() => {
+      const interval = setInterval(() => {
         ctx.fillStyle = `rgba(${br},${bg2},${bb},0.1)`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = color;
         ctx.font = fontSize + 'px monospace';
         for (let i = 0; i < drops.length; i++) {
-          ctx.fillText(chars[Math.floor(Math.random() * chars.length)], i * fontSize, drops[i] * fontSize);
-          if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
-          drops[i]++;
+          ctx.fillText(chars[Math.floor(Math.random() * chars.length)], i * fontSize, (drops[i] as number) * fontSize);
+          if ((drops[i] as number) * fontSize > canvas.height && Math.random() > 0.975) drops[i] = 0;
+          drops[i] = (drops[i] as number) + 1;
         }
       }, 33);
+      return () => clearInterval(interval);
     } else if (effect === 'scanlines') {
-      const draw = () => {
-        ctx.fillStyle = `rgba(${br},${bg2},${bb},1)`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = `rgba(${br > 128 ? br-30 : br+30},${bg2 > 128 ? bg2-30 : bg2+30},${bb > 128 ? bb-30 : bb+30},0.06)`;
-        for (let y = 0; y < canvas.height; y += 4) {
-          ctx.fillRect(0, y, canvas.width, 1);
-        }
-      };
-      draw();
+      ctx.fillStyle = `rgba(${br},${bg2},${bb},1)`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = `rgba(${br > 128 ? br-30 : br+30},${bg2 > 128 ? bg2-30 : bg2+30},${bb > 128 ? bb-30 : bb+30},0.06)`;
+      for (let y = 0; y < canvas.height; y += 4) {
+        ctx.fillRect(0, y, canvas.width, 1);
+      }
     } else if (effect === 'grid') {
       ctx.fillStyle = `rgba(${br},${bg2},${bb},1)`;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -79,67 +76,63 @@ const MatrixBackground = ({ theme, effect }) => {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
       }
     }
-
-    return () => {
-      if (interval) clearInterval(interval);
-      if (raf) cancelAnimationFrame(raf);
-    };
   }, [theme, effect]);
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none" style={{ opacity: effect === 'plain' ? 0 : 0.6 }} />;
 };
 
+const toErr = (e: unknown): string => e instanceof Error ? e.message : String(e);
+
 const Dashboard = () => {
-  const [theme, setTheme] = useState('matrix');
-  const [bgEffect, setBgEffect] = useState('rain');
-  const t = () => THEMES[theme];
-  const [activeTab, setActiveTab] = useState('scraper');
-  const [logs, setLogs] = useState([]);
+  const [theme, setTheme] = useState<ThemeKey>('matrix');
+  const [bgEffect, setBgEffect] = useState<string>('rain');
+  const t = (): ThemeColors => THEMES[theme as ThemeKey];
+  const [activeTab, setActiveTab] = useState<string>('scraper');
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [scraperUrl, setScraperUrl] = useState('');
   const [scraperRunning, setScraperRunning] = useState(false);
-  const [scraperResults, setScraperResults] = useState([]);
+  const [scraperResults, setScraperResults] = useState<ScraperResult[]>([]);
   const [whoisDomain, setWhoisDomain] = useState('');
-  const [whoisResult, setWhoisResult] = useState(null);
+  const [whoisResult, setWhoisResult] = useState<WhoisResult | null>(null);
   const [geoipIp, setGeoipIp] = useState('');
-  const [geoipResult, setGeoipResult] = useState(null);
+  const [geoipResult, setGeoipResult] = useState<GeoIpResult | null>(null);
   const [portScanTarget, setPortScanTarget] = useState('');
   const [portScanPorts, setPortScanPorts] = useState('22,80,443,3306,21');
-  const [portScanResults, setPortScanResults] = useState([]);
+  const [portScanResults, setPortScanResults] = useState<PortResult[]>([]);
   const [subdomainDomain, setSubdomainDomain] = useState('');
-  const [subdomainResults, setSubdomainResults] = useState([]);
+  const [subdomainResults, setSubdomainResults] = useState<SubdomainResult[]>([]);
   const [sslDomain, setSslDomain] = useState('');
-  const [sslResults, setSslResults] = useState(null);
+  const [sslResults, setSslResults] = useState<SslResult | null>(null);
   const [fullReconTarget, setFullReconTarget] = useState('');
-  const [fullReconResults, setFullReconResults] = useState(null);
+  const [fullReconResults, setFullReconResults] = useState<Record<string, unknown> | null>(null);
   const [fullReconRunning, setFullReconRunning] = useState(false);
-  const [localPorts, setLocalPorts] = useState([]);
+  const [localPorts, setLocalPorts] = useState<Record<string, string>[]>([]);
   const [localPortsLoading, setLocalPortsLoading] = useState(false);
-  const [historyList, setHistoryList] = useState([]);
-  const [historyDetail, setHistoryDetail] = useState(null);
+  const [historyList, setHistoryList] = useState<HistoryScan[]>([]);
+  const [historyDetail, setHistoryDetail] = useState<HistoryScan | null>(null);
   const [historyFilter, setHistoryFilter] = useState('');
-  const { messages: liveMessages, connected, clearMessages } = useWebSocket();
+  const { messages: liveMessages, connected } = useWebSocket();
 
-  const liveFeed = (scanType) => liveMessages.filter(m => m.scan === scanType);
+  const liveFeed = (scanType: string): { scan: string; message: string }[] =>
+    (liveMessages as { scan: string; message: string }[]).filter(m => m.scan === scanType);
 
-  const addLog = (type, message) => {
+  const addLog = (type: string, message: string): void => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prev => [{ timestamp, type, message }, ...prev.slice(0, 99)]);
   };
 
-  const apiPost = async (endpoint, body) => {
+  const apiPost = async (endpoint: string, body: unknown): Promise<any> => {
     const r = await fetch(`${API}${endpoint}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
     return r.json();
   };
 
-  const apiGet = async (endpoint) => {
+  const apiGet = async (endpoint: string): Promise<any> => {
     const r = await fetch(`${API}${endpoint}`);
     return r.json();
   };
 
-  const s = (base, style) => ({
-    [base]: t()[style] || t()[style.replace('text-','').replace('border-','').replace('bg-','')]
-  });
+
 
   const realWebScraper = async () => {
     if (!scraperUrl) return addLog('ERROR', 'URL pusty');
@@ -151,14 +144,14 @@ const Dashboard = () => {
       const d = res.data;
       const results = [];
       results.push({ type: 'META', title: d.title, url: scraperUrl });
-      (d.headings || []).forEach(h => results.push({ type: 'HEADING', text: `${h.tag}: ${h.text}` }));
-      (d.paragraphs || []).forEach(p => results.push({ type: 'PARAGRAPH', text: p }));
-      (d.links || []).forEach(l => results.push({ type: 'LINK', text: `[${l.text}] ${l.href}` }));
-      (d.emails || []).forEach(e => results.push({ type: 'EMAIL', text: e }));
+      (d.headings || []).forEach((h: any) => results.push({ type: 'HEADING', text: `${h.tag}: ${h.text}` }));
+      (d.paragraphs || []).forEach((p: string) => results.push({ type: 'PARAGRAPH', text: p }));
+      (d.links || []).forEach((l: any) => results.push({ type: 'LINK', text: `[${l.text}] ${l.href}` }));
+      (d.emails || []).forEach((e: string) => results.push({ type: 'EMAIL', text: e }));
       setScraperResults(results);
       addLog('SUCCESS', `Extracted ${results.length} elements`);
     } catch (error) {
-      addLog('ERROR', `Scraping failed: ${error.message}`);
+      addLog('ERROR', `Scraping failed: ${toErr(error)}`);
     } finally {
       setScraperRunning(false);
     }
@@ -180,7 +173,7 @@ const Dashboard = () => {
       });
       addLog('SUCCESS', 'WHOIS retrieved');
     } catch (error) {
-      addLog('ERROR', `WHOIS failed: ${error.message}`);
+      addLog('ERROR', `WHOIS failed: ${toErr(error)}`);
     }
   };
 
@@ -193,7 +186,7 @@ const Dashboard = () => {
       setGeoipResult(res.data);
       addLog('SUCCESS', 'GeoIP done');
     } catch (error) {
-      addLog('ERROR', `GeoIP failed: ${error.message}`);
+      addLog('ERROR', `GeoIP failed: ${toErr(error)}`);
     }
   };
 
@@ -206,7 +199,7 @@ const Dashboard = () => {
       setPortScanResults(res.data?.results || []);
       addLog('SUCCESS', `Port scan done: ${res.data?.open_count || 0} open ports`);
     } catch (error) {
-      addLog('ERROR', `Port scan failed: ${error.message}`);
+      addLog('ERROR', `Port scan failed: ${toErr(error)}`);
     }
   };
 
@@ -219,7 +212,7 @@ const Dashboard = () => {
       setSubdomainResults(res.data?.subdomains || []);
       addLog('SUCCESS', `Found ${res.data?.found_count || 0} subdomains`);
     } catch (error) {
-      addLog('ERROR', `Subdomain scan failed: ${error.message}`);
+      addLog('ERROR', `Subdomain scan failed: ${toErr(error)}`);
     }
   };
 
@@ -232,7 +225,7 @@ const Dashboard = () => {
       setSslResults(res.data);
       addLog('SUCCESS', 'SSL cert info retrieved');
     } catch (error) {
-      addLog('ERROR', `SSL check failed: ${error.message}`);
+      addLog('ERROR', `SSL check failed: ${toErr(error)}`);
     }
   };
 
@@ -246,7 +239,7 @@ const Dashboard = () => {
       setFullReconResults(res.data);
       addLog('SUCCESS', 'Full recon complete');
     } catch (error) {
-      addLog('ERROR', `Full recon failed: ${error.message}`);
+      addLog('ERROR', `Full recon failed: ${toErr(error)}`);
     } finally {
       setFullReconRunning(false);
     }
@@ -259,13 +252,13 @@ const Dashboard = () => {
       if (r.success) setLocalPorts(r.data.ports || []);
       else addLog('ERROR', `Local ports: ${r.error}`);
     } catch (e) {
-      addLog('ERROR', `Local ports failed: ${e.message}`);
+      addLog('ERROR', `Local ports failed: ${toErr(e)}`);
     } finally {
       setLocalPortsLoading(false);
     }
   };
 
-  const exportJSON = (data, filename) => {
+  const exportJSON = (data: any, filename: string) => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -280,7 +273,7 @@ const Dashboard = () => {
       const res = await apiGet('/api/history');
       if (res.success) setHistoryList(res.data.scans || []);
     } catch (e) {
-      addLog('ERROR', `History load failed: ${e.message}`);
+      addLog('ERROR', `History load failed: ${toErr(e)}`);
     }
   };
 
@@ -290,16 +283,16 @@ const Dashboard = () => {
     }
   }, [activeTab]);
 
-  const viewHistory = async (id) => {
+  const viewHistory = async (id: string) => {
     try {
       const res = await apiGet(`/api/history/${id}`);
       if (res.success) setHistoryDetail(res.data);
     } catch (e) {
-      addLog('ERROR', `History detail failed: ${e.message}`);
+      addLog('ERROR', `History detail failed: ${toErr(e)}`);
     }
   };
 
-  const deleteHistory = async (id) => {
+  const deleteHistory = async (id: string) => {
     try {
       const r = await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
       const j = await r.json();
@@ -309,11 +302,11 @@ const Dashboard = () => {
         if (historyDetail?.id === id) setHistoryDetail(null);
       }
     } catch (e) {
-      addLog('ERROR', `Delete failed: ${e.message}`);
+      addLog('ERROR', `Delete failed: ${toErr(e)}`);
     }
   };
 
-  const downloadReport = async (id) => {
+  const downloadReport = async (id: string) => {
     try {
       const r = await fetch(`${API}/api/history/${id}/report`);
       const html = await r.text();
@@ -323,7 +316,7 @@ const Dashboard = () => {
       a.href = url; a.download = `report-${id}.html`; a.click();
       addLog('SUCCESS', 'Report downloaded');
     } catch (e) {
-      addLog('ERROR', `Report download failed: ${e.message}`);
+      addLog('ERROR', `Report download failed: ${toErr(e)}`);
     }
   };
 
@@ -354,7 +347,7 @@ const Dashboard = () => {
           </p>
           <div style={{display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '8px', alignItems: 'center'}}>
             {Object.entries(THEMES).map(([key, val]) => (
-              <button key={key} onClick={() => setTheme(key)}
+              <button key={key} onClick={() => setTheme(key as ThemeKey)}
                 style={{
                   border: `1px solid ${theme === key ? val.accent : val.muted}`,
                   background: theme === key ? val.dim : 'transparent',
@@ -612,37 +605,37 @@ const Dashboard = () => {
               {fullReconResults && (
                 <div style={{maxHeight: '384px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px'}}>
                   <div style={{border: `1px solid ${T.muted}`, padding: '12px', fontSize: '14px'}}>
-                    <div style={{color: T.accent, fontWeight: 'bold', marginBottom: '4px'}}>Target: {fullReconResults.target}</div>
-                    <div style={{color: T.muted}}>Timestamp: {fullReconResults.timestamp}</div>
+                    <div style={{color: T.accent, fontWeight: 'bold', marginBottom: '4px'}}>Target: {String((fullReconResults as any).target)}</div>
+                    <div style={{color: T.muted}}>Timestamp: {String((fullReconResults as any).timestamp)}</div>
                   </div>
-                  {fullReconResults.whois && (
+                  {(fullReconResults as any).whois && (
                     <div style={{border: `1px solid ${T.muted}`, padding: '12px', fontSize: '14px'}}>
                       <div style={{color: T.accent, fontWeight: 'bold', marginBottom: '4px'}}>WHOIS</div>
-                      <pre style={{fontSize: '12px', whiteSpace: 'pre-wrap'}}>{typeof fullReconResults.whois === 'object' ? JSON.stringify(fullReconResults.whois, null, 2) : String(fullReconResults.whois)}</pre>
+                      <pre style={{fontSize: '12px', whiteSpace: 'pre-wrap'}}>{typeof (fullReconResults as any).whois === 'object' ? JSON.stringify((fullReconResults as any).whois, null, 2) : String((fullReconResults as any).whois)}</pre>
                     </div>
                   )}
-                  {fullReconResults.dns && (
+                  {(fullReconResults as any).dns && (
                     <div style={{border: `1px solid ${T.muted}`, padding: '12px', fontSize: '14px'}}>
                       <div style={{color: T.accent, fontWeight: 'bold', marginBottom: '4px'}}>DNS</div>
-                      <div>IPs: {(fullReconResults.dns.ips || []).join(', ')}</div>
+                      <div>IPs: {((fullReconResults as any).dns.ips || []).join(', ')}</div>
                     </div>
                   )}
-                  {fullReconResults.geoip && (
+                  {(fullReconResults as any).geoip && (
                     <div style={{border: `1px solid ${T.muted}`, padding: '12px', fontSize: '14px'}}>
                       <div style={{color: T.accent, fontWeight: 'bold', marginBottom: '4px'}}>GeoIP</div>
-                      <pre style={{fontSize: '12px'}}>{JSON.stringify(fullReconResults.geoip, null, 2)}</pre>
+                      <pre style={{fontSize: '12px'}}>{JSON.stringify((fullReconResults as any).geoip, null, 2)}</pre>
                     </div>
                   )}
-                  {fullReconResults.subdomains && (
+                  {(fullReconResults as any).subdomains && (
                     <div style={{border: `1px solid ${T.muted}`, padding: '12px', fontSize: '14px'}}>
                       <div style={{color: T.accent, fontWeight: 'bold', marginBottom: '4px'}}>Subdomains</div>
-                      <div>Found: {(fullReconResults.subdomains.found || []).join(', ') || 'none'}</div>
+                      <div>Found: {((fullReconResults as any).subdomains.found || []).join(', ') || 'none'}</div>
                     </div>
                   )}
-                  {fullReconResults.ssl && (
+                  {(fullReconResults as any).ssl && (
                     <div style={{border: `1px solid ${T.muted}`, padding: '12px', fontSize: '14px'}}>
                       <div style={{color: T.accent, fontWeight: 'bold', marginBottom: '4px'}}>SSL</div>
-                      <pre style={{fontSize: '12px', whiteSpace: 'pre-wrap'}}>{fullReconResults.ssl.data || fullReconResults.ssl.error || 'N/A'}</pre>
+                      <pre style={{fontSize: '12px', whiteSpace: 'pre-wrap'}}>{(fullReconResults as any).ssl.data || (fullReconResults as any).ssl.error || 'N/A'}</pre>
                     </div>
                   )}
                 </div>

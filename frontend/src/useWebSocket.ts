@@ -2,12 +2,17 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 
 const API = import.meta.env.VITE_API_URL || '';
 
-const useWebSocket = () => {
-  const [messages, setMessages] = useState([]);
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef(null);
+interface WsMessage {
+  scan: string;
+  message: string;
+}
 
-  const addMessage = useCallback((msg) => {
+const useWebSocket = () => {
+  const [messages, setMessages] = useState<WsMessage[]>([]);
+  const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  const addMessage = useCallback((msg: WsMessage) => {
     setMessages(prev => [msg, ...prev].slice(0, 200));
   }, []);
 
@@ -16,7 +21,7 @@ const useWebSocket = () => {
   }, []);
 
   useEffect(() => {
-    let wsUrl;
+    let wsUrl: string;
     if (API) {
       wsUrl = API.replace(/^http/, 'ws') + '/ws';
     } else {
@@ -24,7 +29,7 @@ const useWebSocket = () => {
       wsUrl = `${proto}//${window.location.host}/ws`;
     }
 
-    let reconnectTimer;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let closed = false;
 
     const connect = () => {
@@ -38,11 +43,11 @@ const useWebSocket = () => {
           setConnected(true);
         };
 
-        ws.onmessage = (event) => {
+        ws.onmessage = (event: MessageEvent) => {
           try {
-            const parsed = JSON.parse(event.data);
+            const parsed = JSON.parse(event.data as string);
             if (parsed.type === 'progress') {
-              addMessage(parsed.data);
+              addMessage(parsed.data as WsMessage);
             }
           } catch (e) {
             console.error('[WS] Parse error:', e);
@@ -73,7 +78,7 @@ const useWebSocket = () => {
 
     return () => {
       closed = true;
-      clearTimeout(reconnectTimer);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;

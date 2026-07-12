@@ -11,6 +11,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const http = require('http');
+const tls = require('tls');
 const { WebSocketServer } = require('ws');
 
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'history.json');
@@ -171,7 +172,11 @@ async function fetchWithRedirectCheck(url, options = {}) {
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get('location');
         if (location) {
-          currentUrl = new URL(location, currentUrl).href;
+          try {
+            currentUrl = new URL(location, currentUrl).href;
+          } catch {
+            throw new Error(`Invalid redirect location: ${location.substring(0, 100)}`);
+          }
           continue;
         }
       }
@@ -182,6 +187,18 @@ async function fetchWithRedirectCheck(url, options = {}) {
     }
   }
   throw new Error(`Redirect loop (max ${maxRedirects})`);
+}
+
+function getSSLCert(host) {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect(443, host, { servername: host, rejectUnauthorized: false }, () => {
+      const cert = socket.getPeerCertificate();
+      socket.end();
+      resolve(cert);
+    });
+    socket.on('error', reject);
+    socket.setTimeout(10000, () => { socket.destroy(); reject(new Error('SSL connection timeout')); });
+  });
 }
 
 async function fetchText(url, options = {}) {
@@ -525,7 +542,7 @@ app.post('/api/geoip', async (req, res) => {
       ll: geo?.ll || [0, 0],
       timezone: geo?.timezone || 'Unknown',
       coordinates: geo?.ll ? `${geo.ll[0]}, ${geo.ll[1]}` : 'Unknown',
-      org: geo?.org || 'Unknown'
+      org: 'N/A'
     };
     const scanId = saveScan('geoip', ip, resultData);
     res.json({ success: true, scan_id: scanId, data: resultData });
@@ -542,6 +559,7 @@ app.post('/api/portscan', async (req, res) => {
     const safeTarget = sanitizeInput(target);
     const safePorts = sanitizeInput(ports);
     if (!safeTarget || !safePorts) return res.status(400).json({ error: 'Invalid target or ports' });
+    if (isPrivateHostname(safeTarget)) return res.status(400).json({ error: 'Private/internal targets not allowed' });
     console.log(`[PORTSCAN] Scanning ${safeTarget} ports ${safePorts}`);
     broadcast('progress', { scan: 'portscan', message: `Starting port scan: ${safeTarget} ports ${safePorts}...` });
     try { await execPromise('nmap --version'); } catch (e) {
@@ -615,18 +633,15 @@ app.post('/api/ssl', async (req, res) => {
     domain = sanitizeInput(domain);
     if (!isValidDomain(domain)) return res.status(400).json({ error: 'Invalid domain format' });
     console.log(`[SSL] Checking: ${domain}`);
-    const { stdout } = await execFilePromise('bash', ['-c', `echo | openssl s_client -connect ${domain}:443 -servername ${domain} 2>/dev/null | openssl x509 -noout -text`]);
-    const issuerMatch = stdout.match(/Issuer: (.+)/);
-    const validFromMatch = stdout.match(/Not Before: (.+)/);
-    const validToMatch = stdout.match(/Not After : (.+)/);
-    const subjectMatch = stdout.match(/Subject: (.+)/);
+    const cert = await getSSLCert(domain);
+    const fmtName = (obj) => obj ? Object.entries(obj).map(([k, v]) => `${k}=${v}`).join(', ') : 'Unknown';
     const resultData = {
       domain,
-      issuer: issuerMatch ? issuerMatch[1].trim() : 'Unknown',
-      subject: subjectMatch ? subjectMatch[1].trim() : 'Unknown',
-      valid_from: validFromMatch ? validFromMatch[1].trim() : 'Unknown',
-      valid_to: validToMatch ? validToMatch[1].trim() : 'Unknown',
-      raw: stdout
+      issuer: fmtName(cert.issuer),
+      subject: fmtName(cert.subject),
+      valid_from: cert.valid_from || 'Unknown',
+      valid_to: cert.valid_to || 'Unknown',
+      raw: JSON.stringify(cert, null, 2)
     };
     const scanId = saveScan('ssl', domain, resultData);
     res.json({ success: true, scan_id: scanId, data: resultData });
@@ -660,6 +675,7 @@ app.post('/api/full-recon', async (req, res) => {
     if (!target) return res.status(400).json({ error: 'Target required' });
     target = sanitizeInput(target);
     if (!isValidDomain(target) && !isValidIP(target)) return res.status(400).json({ error: 'Invalid target format (domain or IP required)' });
+    if (isPrivateHostname(target)) return res.status(400).json({ error: 'Private/internal targets not allowed' });
     console.log(`[FULL-RECON] Starting complete reconnaissance on: ${target}`);
     broadcast('progress', { scan: 'full-recon', message: `Starting full recon on ${target}...` });
     const results = {
@@ -697,8 +713,8 @@ app.post('/api/full-recon', async (req, res) => {
     } catch (e) { results.subdomains = { success: false, error: e.message }; }
     broadcast('progress', { scan: 'full-recon', message: 'Phase 4/8: SSL certificate check...' });
     try {
-      const { stdout } = await execFilePromise('bash', ['-c', `echo | openssl s_client -connect ${target}:443 -servername ${target} 2>/dev/null | openssl x509 -noout -dates`]);
-      results.ssl = { success: true, data: stdout };
+      const cert = await getSSLCert(target);
+      results.ssl = { success: true, data: `Subject: ${cert.subject ? Object.entries(cert.subject).map(([k, v]) => `${k}=${v}`).join(', ') : 'N/A'}\nIssuer: ${cert.issuer ? Object.entries(cert.issuer).map(([k, v]) => `${k}=${v}`).join(', ') : 'N/A'}\nNot Before: ${cert.valid_from || 'N/A'}\nNot After : ${cert.valid_to || 'N/A'}` };
     } catch (e) { results.ssl = { success: false, error: e.message }; }
     broadcast('progress', { scan: 'full-recon', message: 'Phase 5/8: Port scanning (22,80,443,8080,8443)...' });
     try {

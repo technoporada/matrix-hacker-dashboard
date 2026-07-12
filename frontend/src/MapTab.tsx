@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
+import L, { Map as LeafMap } from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import type { ThemeColors } from './types';
 
 const API = import.meta.env.VITE_API_URL || '';
 
-const TYPE_COLORS = {
+const TYPE_COLORS: Record<string, string> = {
   geoip: '#00ff41',
   'full-recon': '#00ccff',
   portscan: '#ffb000',
@@ -14,20 +15,25 @@ const TYPE_COLORS = {
   scrape: '#ff4444',
 };
 
-const escapeHtml = (str) => String(str)
+const escapeHtml = (str: unknown): string => String(str)
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
-const getColor = (type) => TYPE_COLORS[type] || '#888888';
+const getColor = (type: string): string => TYPE_COLORS[type] || '#888888';
 
-const MapTab = ({ theme }) => {
-  const mapRef = useRef(null);
-  const mapInstance = useRef(null);
-  const [points, setPoints] = useState([]);
+interface Point {
+  lat: number; lng: number; ip: string; country: string; city: string;
+  type: string; target: string; created_at: string;
+}
+
+const MapTab = ({ theme }: { theme: ThemeColors }) => {
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<LeafMap | null>(null);
+  const [points, setPoints] = useState<Point[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const T = theme;
 
   useEffect(() => {
@@ -42,7 +48,7 @@ const MapTab = ({ theme }) => {
           setError(j.error || 'Failed to load map data');
         }
       } catch (e) {
-        setError(e.message);
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setLoading(false);
       }
@@ -69,7 +75,7 @@ const MapTab = ({ theme }) => {
       maxZoom: 19,
     }).addTo(map);
 
-    const bounds = [];
+    const bounds: [number, number][] = [];
     points.forEach((p) => {
       const color = getColor(p.type);
       const marker = L.circleMarker([p.lat, p.lng], {
