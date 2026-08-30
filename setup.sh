@@ -52,7 +52,7 @@ echo ""
 
 # --- 3. Sprawdzam remote fonts w kodzie ---
 echo -e "${CYAN}[3/7] Skanuje remote fonts...${NC}"
-FONT_MATCHES=$(grep -rni "fonts.googleapis\|fonts.gstatic\|@import url.*font\|@font-face.*url.*http" --include="*.html" --include="*.tsx" --include="*.js" --include="*.css" ../frontend/src/ 2>/dev/null || true)
+FONT_MATCHES=$(grep -rni --exclude-dir=node_modules --exclude-dir=dist "fonts.googleapis\|fonts.gstatic\|@import url.*font\|@font-face.*url.*http" --include="*.html" --include="*.tsx" --include="*.js" --include="*.css" ../frontend/src/ 2>/dev/null || true)
 if [ -z "$FONT_MATCHES" ]; then
   echo -e "  [${GREEN}OK${NC}] Brak remote fontow - bezpieczne"
 else
@@ -60,7 +60,7 @@ else
   echo "$FONT_MATCHES"
 fi
 
-FONT_BACKEND=$(grep -rni "fonts.googleapis\|fonts.gstatic\|@import url.*font\|@font-face.*url.*http" --include="*.html" --include="*.js" --include="*.css" . 2>/dev/null || true)
+FONT_BACKEND=$(grep -rni --exclude-dir=node_modules --exclude-dir=dist "fonts.googleapis\|fonts.gstatic\|@import url.*font\|@font-face.*url.*http" --include="*.html" --include="*.js" --include="*.css" . 2>/dev/null || true)
 if [ -n "$FONT_BACKEND" ]; then
   warn "Znaleziono remote fonty w backendzie:"
   echo "$FONT_BACKEND"
