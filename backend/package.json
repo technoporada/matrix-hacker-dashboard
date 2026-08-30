@@ -1,0 +1,20 @@
+{
+  "name": "matrix-hacker-dashboard-backend",
+  "version": "2.0.0",
+  "description": "Matrix Hacker Dashboard - Backend API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup": "npm install"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "express": "^4.18.2",
+    "geoip-lite": "^1.4.10",
+    "whois": "^2.14.0",
+    "ws": "^8.21.0"
+  }
+}
